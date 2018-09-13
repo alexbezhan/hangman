@@ -9,98 +9,128 @@ object Main {
     @JvmStatic
     fun main(args: Array<String>) {
         println("Hi. Please, think of a word.")
-        println("What is the word length ?")
+        println("What are the first and last letters ?")
+        val (firstChar, lastChar) = 'a' to 'o'/*Scanner(System.`in`).next().toCharArray() TODO*/
+
         val knownWords = run {
             val wordsDir = javaClass.getResource("/words")?.let { File(it.toURI()) } ?: error("words dir not found")
             wordsDir.listFiles().flatMap { file ->
-                file.readLines()
+                file.readLines().map { it.trim() }
             }
         }
 
-        val length = Scanner(System.`in`).nextInt()
         runBlocking {
-            object : Hangman(0) {
+            object : Hangman(firstChar, lastChar, listOf("abao", "aabo")/*knownWords TODO*/) {
                 override suspend fun pushString(str: String) = println(str)
                 override suspend fun pullString(): String = Scanner(System.`in`).next().trim()
                 override suspend fun pullInt(): Int = Scanner(System.`in`).nextInt()
-            }.round(length, knownWords)
+            }.round()
         }
     }
 }
 
-abstract class Hangman(seed: Long?) {
+abstract class Hangman(private val firstChar: Char, private val lastChar: Char, knownWords: List<String>) {
     private val log = LoggerFactory.getLogger(javaClass)
-    private val random = seed?.let { Random(it) } ?: Random()
 
     abstract suspend fun pushString(str: String)
     abstract suspend fun pullString(): String
     abstract suspend fun pullInt(): Int
 
-    suspend fun round(wordLength: Int, knownWords: List<String>) {
-        val letters = (0 until wordLength).map { null }
-        round(knownWords.filter { it.length == wordLength }, letters.withIndex().toList())
-    }
+    private val wordIndex = buildIndex(firstChar, lastChar, knownWords)
 
-    private suspend fun round(knownWords: List<String>, letters: List<IndexedValue<Char?>>, without: List<Char> = emptyList()) {
-        log.debug("[knownWords : ${knownWords.joinToString(" ")}]")
-        val unknownLetterIdx = letters.find { (_, c) -> c == null }?.index
-        if (unknownLetterIdx == null) {
-            pushString("I won!")
+    suspend fun round(knownLetters: Set<KnownLetter> = emptySet(), without: Set<Char> = emptySet()) {
+        log.debug("[wordIndex : ${wordIndex.index}]")
+        val word = run {
+            log.debug("[knownLetters: $knownLetters]")
+            wordIndex[knownLetters]?.find { word -> !without.exists { word.contains(it) } }
+        }
+        pushString(firstChar + knownLetters.sortedBy { it.index }.map { it.char }.joinToString("") + lastChar)
+        if (word == null) {
+            pushString("I don't know this word. I give up. You won! Congratulations!")
             pushString("Bye.")
         } else {
-            val wordsSubset = run {
-                val knownLetters = letters.filter { it.value != null }
-                val x = knownWords
-                        .filter { word -> knownLetters.forAll { word[it.index] == it.value } }
-                        .filter { word -> !without.exists { word.contains(it) } }
-                log.debug("[wordsSubset: " + x.joinToString(" ") + "]")
-                x
-            }
-            if (wordsSubset.isEmpty()) {
-                pushString("I don't know this word. I give up. You won! Congratulations!")
+            log.debug("[word: $word]")
+            val letter = word.withIndex().drop(1).dropLast(1).dropWhile { (i, c) -> knownLetters.exists { it.index == i && it.char == c } }.firstOrNull()?.value
+            if (letter == null) {
+                pushString("It's $word")
                 pushString("Bye.")
             } else {
-                pushString(letters.map { it.value ?: "_" }.joinToString(" "))
-                val letter = run {
-                    val randomWord = wordsSubset[random.nextInt(wordsSubset.size)]
-                    log.debug("[randomWord: $randomWord]")
-                    randomWord.toCharArray()[unknownLetterIdx]
-                }
                 pushString("$letter ? (yes/no)")
-                val answer = pullString()
+                val answer = readAnswer(knownLetters)
                 when (answer) {
-                    "yes" -> {
-                        val idx = readPos(letters)
-                        round(wordsSubset, letters.set(idx, IndexedValue(idx, letter)), without)
+                    is Answer.Yes -> {
+                        val idx = answer.index
+                        val nextLetters = knownLetters + KnownLetter(idx, letter)
+                        round(nextLetters, without)
                     }
-                    "no" -> round(wordsSubset, letters, without + letter)
-                    else -> error("Illegal answer: $answer")
+                    is Answer.No -> round(knownLetters, without + letter)
                 }
             }
         }
     }
 
-    suspend fun readPos(letters: List<IndexedValue<Char?>>): Int {
-        pushString("Letter pos [1..${letters.size}]: ")
-        val idx = pullInt() - 1
-        val alreadyHaveThisIdx = letters.filter { it.value != null }.map { it.index }.contains(idx)
-        return if (idx < 0 || idx >= letters.size || alreadyHaveThisIdx) {
+    private suspend fun readAnswer(letters: Set<KnownLetter>): Answer {
+        return when (pullString()) {
+            "yes" -> Answer.Yes(readIdx(letters))
+            "no" -> Answer.No
+            else -> {
+                pushString("Wrong answer. Try again")
+                readAnswer(letters)
+            }
+        }
+    }
+
+    private tailrec suspend fun readIdx(letters: Set<KnownLetter>): Int {
+        pushString("Letter idx: ")
+        val idx = pullInt()
+        val alreadyHaveThisIdx = letters.map { it.index }.contains(idx)
+        return if (idx < 0 || alreadyHaveThisIdx) {
             pushString("Wrong pos")
-            readPos(letters)
+            readIdx(letters)
         } else {
             idx
         }
     }
 }
 
-fun <T> Iterable<IndexedValue<T>>.forAll(pred: (IndexedValue<T>) -> Boolean): Boolean = find(not(pred)) == null
+fun buildIndex(firstChar: Char, lastChar: Char, knownWords: List<String>): WordIndex {
+    tailrec fun combinations(word: String, charIdx: Int = 0, acc: List<Set<KnownLetter>> = emptyList()): List<Set<KnownLetter>> {
+        val char = word.firstOrNull()
+        return if (char == null) {
+            acc.map { it.toSet() }
+        } else {
+            val nextWord = word.drop(1)
+            if (nextWord.isEmpty() || charIdx == 0) {
+                // skip first and last chars, we don't need them in the index, because we query index without last char
+                combinations(nextWord, charIdx + 1, acc)
+            } else {
+                val letter = KnownLetter(charIdx, char)
+                val nextAcc = acc.flatMap { set -> setOf(set, set + letter) }.plusElement(setOf(letter))
+                combinations(nextWord, charIdx + 1, nextAcc)
+            }
+        }
+    }
 
-fun <T> not(pred: (T) -> Boolean): (T) -> Boolean = { x -> !pred(x) }
-
-fun <T> List<T>.exists(pred: (T) -> Boolean): Boolean = find(pred) != null
-
-fun <T> List<T>.set(idx: Int, e: T): List<T> {
-    val mut = toMutableList()
-    mut[idx] = e
-    return mut.toList()
+    val index = knownWords.flatMap { word ->
+        if (!word.startsWith(firstChar) || !word.endsWith(lastChar)) emptyList()
+        else combinations(word).map { it to word }
+    }.groupBy { it.first }.mapValues { (_, values) -> values.map { it.second } }
+    return WordIndex(index, knownWords)
 }
+
+sealed class Answer {
+    data class Yes(val index: Int) : Answer()
+    object No : Answer()
+}
+
+class WordIndex(val index: Map<Set<KnownLetter>, List<String>>, val allWords: List<String>) {
+    operator fun get(key: Set<KnownLetter>): List<String>? =
+            if (key.isEmpty()) allWords
+            else index[key]
+}
+
+data class KnownLetter(val index: Int, val char: Char) {
+    override fun toString(): String = "$index:$char"
+}
+
+fun <T> Iterable<T>.exists(pred: (T) -> Boolean): Boolean = find(pred) != null
