@@ -1,14 +1,11 @@
 package app
 
+import kotlinx.coroutines.experimental.runBlocking
 import org.slf4j.LoggerFactory
 import java.io.File
-import java.io.InputStream
-import java.io.PrintStream
 import java.util.*
 
 object Main {
-    val log = LoggerFactory.getLogger(javaClass)
-
     @JvmStatic
     fun main(args: Array<String>) {
         println("Hi. Please, think of a word.")
@@ -21,61 +18,77 @@ object Main {
         }
 
         val length = Scanner(System.`in`).nextInt()
-        val letters = (0 until length).map { null }
-        Hangman(0, System.out, System.`in`).round(knownWords.filter { word -> word.length == length }, letters.withIndex().toList())
+        runBlocking {
+            object : Hangman(0) {
+                override suspend fun pushString(str: String) = println(str)
+                override suspend fun pullString(): String = Scanner(System.`in`).next().trim()
+                override suspend fun pullInt(): Int = Scanner(System.`in`).nextInt()
+            }.round(length, knownWords)
+        }
     }
 }
 
-class Hangman(seed: Long?, private val printStream: PrintStream, private val inputStream: InputStream) {
+abstract class Hangman(seed: Long?) {
+    private val log = LoggerFactory.getLogger(javaClass)
     private val random = seed?.let { Random(it) } ?: Random()
 
-    fun round(knownWords: List<String>, letters: List<IndexedValue<Char?>>, without: List<Char> = emptyList()) {
-        println(letters.map { it.value ?: "_" }.joinToString(" "))
-        Main.log.debug("[knownWords : ${knownWords.joinToString(" ")}]")
+    abstract suspend fun pushString(str: String)
+    abstract suspend fun pullString(): String
+    abstract suspend fun pullInt(): Int
+
+    suspend fun round(wordLength: Int, knownWords: List<String>) {
+        val letters = (0 until wordLength).map { null }
+        round(knownWords.filter { it.length == wordLength }, letters.withIndex().toList())
+    }
+
+    private suspend fun round(knownWords: List<String>, letters: List<IndexedValue<Char?>>, without: List<Char> = emptyList()) {
+        log.debug("[knownWords : ${knownWords.joinToString(" ")}]")
         val unknownLetterIdx = letters.find { (_, c) -> c == null }?.index
         if (unknownLetterIdx == null) {
-            printStream.println("done")
+            pushString("I won!")
+            pushString("Bye.")
         } else {
             val wordsSubset = run {
                 val knownLetters = letters.filter { it.value != null }
                 val x = knownWords
                         .filter { word -> knownLetters.forAll { word[it.index] == it.value } }
                         .filter { word -> !without.exists { word.contains(it) } }
-                Main.log.debug("[wordsSubset: " + x.joinToString(" ") + "]")
+                log.debug("[wordsSubset: " + x.joinToString(" ") + "]")
                 x
             }
             if (wordsSubset.isEmpty()) {
-                printStream.println("I don't know this word. I give up. You won, congratulations!")
-                return
-            }
-
-            val letter = run {
-                val randomWord = wordsSubset[random.nextInt(wordsSubset.size)]
-                Main.log.debug("[randomWord: $randomWord]")
-                randomWord.toCharArray()[unknownLetterIdx]
-            }
-            printStream.println("$letter ? (yes/no)")
-            when (Scanner(inputStream).next().trim()) {
-                "yes" -> {
-                    val idx = run {
-                        tailrec fun readPos(): Int {
-                            print("Letter pos [1..${letters.size}]: ")
-                            val idx = Scanner(inputStream).nextInt() - 1
-                            val alreadyHaveThisIdx = letters.filter { it.value != null }.map { it.index }.contains(idx)
-                            return if (idx < 0 || idx >= letters.size || alreadyHaveThisIdx) {
-                                printStream.println("Wrong pos")
-                                readPos()
-                            } else {
-                                idx
-                            }
-                        }
-                        readPos()
-                    }
-                    round(wordsSubset, letters.set(idx, IndexedValue(idx, letter)), without)
+                pushString("I don't know this word. I give up. You won! Congratulations!")
+                pushString("Bye.")
+            } else {
+                pushString(letters.map { it.value ?: "_" }.joinToString(" "))
+                val letter = run {
+                    val randomWord = wordsSubset[random.nextInt(wordsSubset.size)]
+                    log.debug("[randomWord: $randomWord]")
+                    randomWord.toCharArray()[unknownLetterIdx]
                 }
-                "no" -> round(wordsSubset, letters, without + letter)
-                else -> error("Illegal answer")
+                pushString("$letter ? (yes/no)")
+                val answer = pullString()
+                when (answer) {
+                    "yes" -> {
+                        val idx = readPos(letters)
+                        round(wordsSubset, letters.set(idx, IndexedValue(idx, letter)), without)
+                    }
+                    "no" -> round(wordsSubset, letters, without + letter)
+                    else -> error("Illegal answer: $answer")
+                }
             }
+        }
+    }
+
+    suspend fun readPos(letters: List<IndexedValue<Char?>>): Int {
+        pushString("Letter pos [1..${letters.size}]: ")
+        val idx = pullInt() - 1
+        val alreadyHaveThisIdx = letters.filter { it.value != null }.map { it.index }.contains(idx)
+        return if (idx < 0 || idx >= letters.size || alreadyHaveThisIdx) {
+            pushString("Wrong pos")
+            readPos(letters)
+        } else {
+            idx
         }
     }
 }
