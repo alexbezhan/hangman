@@ -31,7 +31,10 @@ class WordIndex(val index: Map<Set<Char>, List<String>>) : Serializable {
         fun read(dir: File, firstLast: FirstLastChar): WordIndex? {
             if (!dir.exists()) return null
 
-            val fileBytes = indexFile(dir, firstLast).readBytes()
+            val indexFile = indexFile(dir, firstLast)
+            if (!indexFile.exists()) return null
+
+            val fileBytes = indexFile.readBytes()
             if (fileBytes.isEmpty()) return null
 
             val bis = ByteArrayInputStream(fileBytes)

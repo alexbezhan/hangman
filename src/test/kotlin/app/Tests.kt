@@ -1,6 +1,5 @@
 package app
 
-import app.IndexBuilder.build
 import kotlinx.coroutines.experimental.GlobalScope
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
@@ -12,7 +11,7 @@ import java.nio.file.Files
 class Tests {
     @Test
     fun shouldPickLetterThatDividesWordsInHalfByFrequency() {
-        assertEquals(LetterCandidate('a', 2), TestHangman().pickLetter(listOf("abbb", "acba", "abba", "aaaa", "aaaa")))
+        assertEquals(LetterCandidate('b', 3), TestHangman().pickLetter(listOf("abbb", "acba", "abba", "aaaa", "aaaa"), emptyList()))
     }
 
     @Test
@@ -24,7 +23,7 @@ class Tests {
 
     @Test
     fun shouldBuildMultipleIndexes() {
-        val indexes = build(listOf("god", "gord", "color", "colour"))
+        val indexes = IndexBuilder.build(listOf("god", "gord", "color", "colour"))
         assertEquals(2, indexes.size)
         assertEquals("{[g, d]=[god, gord], [g, d, o]=[god, gord], [g, d, r]=[gord], [g, d, o, r]=[gord]}", indexes[FirstLastChar('g', 'd')]!!.index.toString())
         assertEquals("{[c, r]=[color, colour], [c, r, o]=[color, colour], [c, r, l]=[color, colour], [c, r, l, o]=[color, colour], [c, r, u]=[colour], [c, r, o, u]=[colour], [c, r, l, u]=[colour], [c, r, l, o, u]=[colour]}", indexes[FirstLastChar('c', 'r')]!!.index.toString())
@@ -39,23 +38,45 @@ class Tests {
     }
 
     @Test
-    fun shouldBuildIndexFromRealFile() {
-        val index = build(readTestWords())[FirstLastChar('c', 's')]!!
+    fun shouldBuildIndexFromTestFile() {
+        val index = IndexBuilder.build(readTestWords())[FirstLastChar('c', 's')]!!
         assertEquals(listOf("cheque's", "cheques", "colourss", "colour's", "colours"), index[setOf('c', 's')])
         assertEquals(listOf("cheque's", "cheques"), index[setOf('c', 'q', 's')])
         assertEquals(listOf("colourss", "colour's", "colours"), index[setOf('c', 'l', 's')])
     }
 
     @Test
-    fun shouldGuessUsingIndexFromRealFile() {
+    fun shouldGuessUsingIndexFromTestFile() {
         val hangman = TestHangman()
-        val hangmanJob = GlobalScope.launch {
-            hangman.start('c', 's', build(readTestWords())[FirstLastChar('c', 's')]!!)
-        }
+        val hangmanJob = GlobalScope.launch { hangman.start('c', 's', IndexBuilder.build(readTestWords())[FirstLastChar('c', 's')]!!) }
         runBlocking {
             hangman.assertRound("cs", '\'', Answer.Yes(6))
             hangman.assertRound("c's", 'l', Answer.Yes(2))
             hangman.assertWin("colour's")
+            hangmanJob.join()
+        }
+    }
+
+    @Test
+    fun shouldGuessIgnoringCase() {
+        val hangman = TestHangman()
+        val hangmanJob = GlobalScope.launch { hangman.start('g', 'd', IndexBuilder.build(listOf("GOd", "gord"))[FirstLastChar('g', 'd')]!!) }
+        runBlocking {
+            hangman.assertRound("gd", 'o', Answer.Yes(1))
+            hangman.assertRound("god", 'r', Answer.No)
+            hangman.assertWin("GOd")
+            hangmanJob.join()
+        }
+    }
+
+    @Test
+    fun shouldGuessLongerWord() {
+        val hangman = TestHangman()
+        val hangmanJob = GlobalScope.launch { hangman.start('g', 'd', IndexBuilder.build(listOf("god", "gord"))[FirstLastChar('g', 'd')]!!) }
+        runBlocking {
+            hangman.assertRound("gd", 'o', Answer.Yes(1))
+            hangman.assertRound("god", 'r', Answer.Yes(2))
+            hangman.assertWin("gord")
             hangmanJob.join()
         }
     }
@@ -105,7 +126,7 @@ class Tests {
     }
 
     private fun buildIndex(words: List<String>): WordIndex =
-            build(words)[FirstLastChar(words.first().first(), words.first().last())]!!
+            IndexBuilder.build(words)[FirstLastChar(words.first().first(), words.first().last())]!!
 
     private fun readTestWords(): List<String> =
             javaClass.getResource("/test-words/canadian-words.10")?.let { File(it.toURI()) }?.let { file ->

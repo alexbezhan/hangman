@@ -27,7 +27,23 @@ object IndexBuilder {
     }
 
     fun buildAndPersist(indexDir: File, knownWords: List<String>, chunkSize: Int) {
-        val indexes = knownWords.chunked(chunkSize).flatMap { build(it).toList() }
+        val nThreads = 4
+        val tpContext = newFixedThreadPoolContext(nThreads, "tp")
+
+        log.info("Building indexes in chunks by $chunkSize words")
+        val indexes = runBlocking {
+            knownWords.asSequence().chunked(chunkSize).withIndex().map { (i, words) ->
+                log.info("#$i start")
+                i to async(tpContext) {
+                    build(words).toList()
+                }
+            }.toList().flatMap { (i, deferred) ->
+                val start = System.nanoTime()
+                val index = deferred.await()
+                log.info("#$i done in ${(System.nanoTime() - start) / 1000000000}s")
+                index
+            }
+        }
         indexes.map { (firstLast, index) ->
             val indexFile = WordIndex.indexFile(indexDir, firstLast)
             if (!indexFile.exists())
@@ -55,27 +71,16 @@ object IndexBuilder {
                 }
             }
         }
-
         fun combinations(word: String, firstLast: FirstLastChar) =
                 combinations(word, firstLast, 0, listOf(listOf(firstLast.firstChar, firstLast.lastChar)))
 
-        val start = System.nanoTime()
-        val nThreads = 4
-        val tpContext = newFixedThreadPoolContext(nThreads, "tp")
         return runBlocking {
-            log.info("Making combinations")
             val indexes: Map<FirstLastChar, WordIndex> = run {
                 val allIndexesMap = mutableMapOf<FirstLastChar, MutableMap<Set<Char>, List<String>>>()
                 knownWords.asSequence().groupBy { FirstLastChar(it.first().toLowerCase(), it.last().toLowerCase()) }.map { (firstLast, words) ->
-                    log.trace("chunk ${firstLast.firstChar.toLowerCase()}${firstLast.lastChar.toLowerCase()} start, words: ${words.size}")
-                    firstLast to async(tpContext) {
-                        words.map { word -> combinations(word.toLowerCase(), firstLast).map { it to word } }
-                    }
-                }.toList().forEach { (firstLast, deferred) ->
-                    val (firstChar, lastChar) = firstLast
-                    log.trace("chunk ${firstChar.toLowerCase()}${lastChar.toLowerCase()} end")
-                    val combinations = deferred.await().flatten()
-                    val indexMap = allIndexesMap[firstLast] ?: mutableMapOf<Set<Char>, List<String>>()
+                    firstLast to words.flatMap { word -> combinations(word.toLowerCase(), firstLast).map { it to word } }
+                }.toList().forEach { (firstLast, combinations) ->
+                    val indexMap = allIndexesMap[firstLast] ?: mutableMapOf()
                     combinations.forEach { (chars, word) ->
                         val list = indexMap[chars] ?: emptyList()
                         indexMap[chars] = list + word
@@ -84,7 +89,6 @@ object IndexBuilder {
                 }
                 allIndexesMap.mapValues { (_, value) -> WordIndex(value.toMap()) }
             }
-            log.info("Done in ${(System.nanoTime() - start) / 1000000000}s")
             indexes
         }
     }

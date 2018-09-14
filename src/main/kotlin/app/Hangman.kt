@@ -16,10 +16,9 @@ abstract class Hangman {
     private suspend fun start(knownLetters: List<KnownLetter>, lastChar: Char, wordIndex: WordIndex, without: Set<Char> = emptySet()) {
         log.debug("[wordIndex : ${wordIndex.index}]")
         log.debug("[knownLetters: $knownLetters]")
-        val wordCandidates = wordIndex[knownLetters.asSequence().map { it.char }.toSet() + lastChar]
-                ?.asSequence()
-                ?.filter { word -> knownLetters.forAll { letter -> word.getOrNull(letter.index) == letter.char } }
-                ?.filter { word -> without.intersect(word.toCharArray().toSet()).isEmpty() }
+        val wordCandidates = wordIndex[knownLetters.asSequence().map { it.char }.toSet() + lastChar]?.asSequence()
+                ?.filter { word -> knownLetters.forAll { letter -> word.toLowerCase().getOrNull(letter.index) == letter.char } }
+                ?.filter { word -> without.intersect(word.toLowerCase().toCharArray().toSet()).isEmpty() }
                 ?.toList()
         log.info("[wordCandidates: ${wordCandidates?.joinToString(" ")}]")
         if (wordCandidates?.size == 1) {
@@ -30,37 +29,31 @@ abstract class Hangman {
                 printString("I don't know this word. I give up. You won! Congratulations!")
                 printString("Bye.")
             } else {
-                val foundWord = wordCandidates.find { it.length == knownLetters.size + 1/*last char*/ }
-                if (foundWord != null) {
-                    printString("It's $foundWord")
-                    printString("Bye.")
-                } else {
-                    val (letter, _) = pickLetter(wordCandidates)
-                    printString(knownLetters.asSequence().sortedBy { it.index }.map { it.char }.joinToString("") + lastChar)
-                    printString("$letter ? (yes/no)")
-                    val answer = readAnswer(knownLetters)
-                    when (answer) {
-                        is Answer.Yes -> {
-                            val idx = answer.index
-                            val nextLetters = knownLetters + KnownLetter.create(idx, letter)
-                            start(nextLetters, lastChar, wordIndex, without)
-                        }
-                        is Answer.No -> start(knownLetters, lastChar, wordIndex, without + letter)
+                val (letter, _) = pickLetter(wordCandidates, knownLetters)
+                printString(knownLetters.asSequence().sortedBy { it.index }.map { it.char }.joinToString("") + lastChar)
+                printString("$letter ? (yes/no)")
+                val answer = readAnswer(knownLetters)
+                when (answer) {
+                    is Answer.Yes -> {
+                        val idx = answer.index
+                        val nextLetters = knownLetters + KnownLetter.create(idx, letter)
+                        start(nextLetters, lastChar, wordIndex, without)
                     }
+                    is Answer.No -> start(knownLetters, lastChar, wordIndex, without + letter)
                 }
             }
         }
     }
 
-    fun pickLetter(words: List<String>): LetterCandidate {
+    fun pickLetter(words: List<String>, knownLetters: List<KnownLetter>): LetterCandidate {
         val lettersFrequency = words.flatMap { word ->
-            word.toCharArray().drop(1).dropLast(1).toSet()
+            word.toLowerCase().toCharArray().dropLast(1).asSequence().withIndex().dropWhile { (i, c) -> knownLetters.exists { it.index == i && it.char == c } }.map { it.value }.toSet()
         }.toList().groupBy { it }.mapValues { (_, values) -> values.size }.toList().sortedBy { it.second }
         // Look for a letter, that is found in half of the words, so the answer to it will reduce our search candidates in half in the next loop.
         // It may be actually done even better, not just look for middle, but find the least distant from words.size/2, but it's ok for now.
         val (middleFrequentLetter, wordsCountWithIt) = lettersFrequency[lettersFrequency.size / 2]
         log.debug("Letter: $middleFrequentLetter, found in $wordsCountWithIt words")
-        return LetterCandidate(middleFrequentLetter,  wordsCountWithIt)
+        return LetterCandidate(middleFrequentLetter, wordsCountWithIt)
     }
 
     private suspend fun readAnswer(letters: Iterable<KnownLetter>): Answer {

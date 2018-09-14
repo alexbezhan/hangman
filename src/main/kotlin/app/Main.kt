@@ -15,7 +15,7 @@ object Main {
             val (firstChar, lastChar) = Scanner(System.`in`).next().toCharArray()
             val firstLast = FirstLastChar(firstChar, lastChar)
 
-            val wordIndex = WordIndex.read(indexDir, firstLast) ?: error("Index not found")
+            val wordIndex = WordIndex.read(indexDir, firstLast) ?: return println("I don't know words that start with '$firstChar' and end with '$lastChar'")
             runBlocking {
                 val hangman = object : Hangman() {
                     override suspend fun printString(str: String) = println(str)
