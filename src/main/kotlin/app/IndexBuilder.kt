@@ -23,7 +23,7 @@ object IndexBuilder {
                 file.readLines().map { it.trim() }
             }
         }
-        buildAndPersist(indexDir, knownWords, 1000)
+        buildAndPersist(indexDir, knownWords, 100)
     }
 
     fun buildAndPersist(indexDir: File, knownWords: List<String>, chunkSize: Int) {
@@ -31,28 +31,23 @@ object IndexBuilder {
         val tpContext = newFixedThreadPoolContext(nThreads, "tp")
 
         log.info("Building indexes in chunks by $chunkSize words")
-        val indexes = runBlocking {
-            knownWords.asSequence().chunked(chunkSize).withIndex().map { (i, words) ->
-                log.info("#$i start")
-                i to async(tpContext) {
-                    build(words).toList()
-                }
-            }.toList().flatMap { (i, deferred) ->
-                val start = System.nanoTime()
-                val index = deferred.await()
-                log.info("#$i done in ${(System.nanoTime() - start) / 1000000000}s")
-                index
+        knownWords.asSequence().chunked(chunkSize).withIndex().chunked(nThreads).map { chunks ->
+            val indexes = runBlocking {
+                chunks.map { (i, words) ->
+                    log.info("chunk #$i start")
+                    async(tpContext) { build(words).toList() }
+                }.flatMap { it.await() }
             }
-        }
-        indexes.map { (firstLast, index) ->
-            val indexFile = WordIndex.indexFile(indexDir, firstLast)
-            if (!indexFile.exists())
-                indexFile.createNewFile()
+            indexes.forEach { (firstLast, index) ->
+                val indexFile = WordIndex.indexFile(indexDir, firstLast)
+                if (!indexFile.exists())
+                    indexFile.createNewFile()
 
-            val indexFromFile = WordIndex.read(indexDir, firstLast)
-            val combinedIndex = indexFromFile?.let { index.merge(it) } ?: index
-            combinedIndex.writeTo(indexDir, firstLast)
-        }
+                val indexFromFile = WordIndex.read(indexDir, firstLast)
+                val combinedIndex = indexFromFile?.let { index.merge(it) } ?: index
+                combinedIndex.writeTo(indexDir, firstLast)
+            }
+        }.count() // drain the sequence
     }
 
     fun build(knownWords: List<String>): Map<FirstLastChar, WordIndex> {
@@ -71,25 +66,21 @@ object IndexBuilder {
                 }
             }
         }
+
         fun combinations(word: String, firstLast: FirstLastChar) =
                 combinations(word, firstLast, 0, listOf(listOf(firstLast.firstChar, firstLast.lastChar)))
 
-        return runBlocking {
-            val indexes: Map<FirstLastChar, WordIndex> = run {
-                val allIndexesMap = mutableMapOf<FirstLastChar, MutableMap<Set<Char>, List<String>>>()
-                knownWords.asSequence().groupBy { FirstLastChar(it.first().toLowerCase(), it.last().toLowerCase()) }.map { (firstLast, words) ->
-                    firstLast to words.flatMap { word -> combinations(word.toLowerCase(), firstLast).map { it to word } }
-                }.toList().forEach { (firstLast, combinations) ->
-                    val indexMap = allIndexesMap[firstLast] ?: mutableMapOf()
-                    combinations.forEach { (chars, word) ->
-                        val list = indexMap[chars] ?: emptyList()
-                        indexMap[chars] = list + word
-                    }
-                    allIndexesMap[firstLast] = indexMap
-                }
-                allIndexesMap.mapValues { (_, value) -> WordIndex(value.toMap()) }
+        val allIndexesMap = mutableMapOf<FirstLastChar, MutableMap<Set<Char>, List<String>>>()
+        knownWords.asSequence().groupBy { FirstLastChar(it.first().toLowerCase(), it.last().toLowerCase()) }.map { (firstLast, words) ->
+            firstLast to words.flatMap { word -> combinations(word.toLowerCase(), firstLast).map { it to word } }
+        }.toList().forEach { (firstLast, combinations) ->
+            val indexMap = allIndexesMap[firstLast] ?: mutableMapOf()
+            combinations.forEach { (chars, word) ->
+                val list = indexMap[chars] ?: emptyList()
+                indexMap[chars] = list + word
             }
-            indexes
+            allIndexesMap[firstLast] = indexMap
         }
+        return allIndexesMap.mapValues { (_, value) -> WordIndex(value.toMap()) }
     }
 }
