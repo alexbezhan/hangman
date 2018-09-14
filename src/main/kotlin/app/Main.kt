@@ -18,12 +18,12 @@ object Main {
             val (firstChar, lastChar) = Scanner(System.`in`).next().toCharArray()
 
             runBlocking {
-                val hangman = object : Hangman(firstChar, lastChar, wordIndex) {
+                val hangman = object : Hangman() {
                     override suspend fun printString(str: String) = println(str)
                     override suspend fun readString(): String = Scanner(System.`in`).next().trim()
                     override suspend fun readInt(): Int = Scanner(System.`in`).nextInt()
                 }
-                hangman.start()
+                hangman.start(firstChar, lastChar, wordIndex)
             }
         }
     }

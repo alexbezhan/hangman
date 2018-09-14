@@ -2,8 +2,8 @@ package app
 
 import java.io.*
 
-class WordIndex(val index: Map<Set<KnownLetter>, List<String>>, val allWords: List<String>) : Serializable {
-    operator fun get(key: Set<KnownLetter>): List<String>? =
+class WordIndex(val index: Map<Set<Char>, List<String>>, val allWords: List<String>) : Serializable {
+    operator fun get(key: Set<Char>): List<String>? =
             if (key.isEmpty()) allWords
             else index[key]
 

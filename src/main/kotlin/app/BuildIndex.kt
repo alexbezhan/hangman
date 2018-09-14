@@ -1,8 +1,11 @@
 package app
 
-import kotlinx.coroutines.experimental.*
+import kotlinx.coroutines.experimental.async
+import kotlinx.coroutines.experimental.newFixedThreadPoolContext
+import kotlinx.coroutines.experimental.runBlocking
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.util.*
 
 object BuildIndex {
     private val log = LoggerFactory.getLogger(BuildIndex::class.java)
@@ -16,61 +19,65 @@ object BuildIndex {
                 file.readLines().map { it.trim() }
             }
         }
-        val wordIndex = buildIndex(knownWords.take(10000))
+        val wordIndex = buildIndex(knownWords.take(1000))
         wordIndex.writeTo(indexFile)
     }
 
     fun buildIndex(knownWords: List<String>): WordIndex {
-        val start = System.nanoTime()
-
-        tailrec fun combinations(word: String, charIdx: Int = 0, acc: List<Set<KnownLetter>> = emptyList()): List<Set<KnownLetter>> {
+        tailrec fun combinations(word: String, firstChar: Char, lastChar: Char, charIdx: Int, acc: List<List<Char>> = emptyList()): Set<Set<Char>> {
             val char = word.firstOrNull()
             return if (char == null) {
-                acc.map { it.toSet() }
+                acc.asSequence().map { it.toSet() }.toSet()
             } else {
                 val nextWord = word.drop(1)
                 if (nextWord.isEmpty() || charIdx == 0) {
                     // skip first and last chars, we don't need them in the index, because we query index without last char
-                    combinations(nextWord, charIdx + 1, acc)
+                    combinations(nextWord, firstChar, lastChar, charIdx + 1, acc)
                 } else {
-                    val letter = KnownLetter.create(charIdx, char)
-                    val nextAcc = acc.flatMap { set -> setOf(set, set + letter) }.plusElement(KnownLetters.create(letter))
-                    combinations(nextWord, charIdx + 1, nextAcc)
+                    val nextAcc = acc.flatMap { list -> listOf(list, list + char) }.plusElement(listOf(firstChar, char, lastChar))
+                    combinations(nextWord, firstChar, lastChar, charIdx + 1, nextAcc)
                 }
             }
         }
 
-        val tpContext = newFixedThreadPoolContext(4, "tp")
+        fun combinations(word: String, firstChar: Char, lastChar: Char) =
+                combinations(word, firstChar, lastChar, 0, listOf(listOf(firstChar, lastChar)))
+
+        val start = System.nanoTime()
+        val nThreads = 4
+        val tpContext = newFixedThreadPoolContext(nThreads, "tp")
         return runBlocking {
-            with(CoroutineScope(tpContext)) {
-                log.info("Making combinations")
-                val combs: List<Pair<Set<KnownLetter>, String>> = run {
-                    val accList = mutableListOf<Pair<Set<KnownLetter>, String>>()
-                    knownWords.chunked(knownWords.size / 4).map { words ->
-                        async { words.map { word -> combinations(word).map { it to word } }}
-                    }.forEach{
-                        accList.addAll(it.await().flatten())
+            log.info("Making combinations")
+            val index: Map<Set<Char>, List<String>> = run {
+                val accMap = mutableMapOf<Set<Char>, List<String>>()
+                knownWords.asSequence().groupBy { it.first().toLowerCase() to it.last().toLowerCase() }.map { (firstLast, words) ->
+                    val (firstChar, lastChar) = firstLast
+                    log.trace("chunk ${firstChar.toLowerCase()}${lastChar.toLowerCase()} start, words: ${words.size}")
+                    firstLast to async(tpContext) {
+                        words.map { word -> combinations(word.toLowerCase(), firstChar, lastChar).map { it to word } }
                     }
-                    accList.toList()
-                }
-//                val combs: List<Pair<Set<KnownLetter, String>> = knownWords.map { word -> async { combinations(word).map { it to word } } }.flatMap { it.await() }
-                log.info("Grouping")
-                val grouped = run {
-                    val accMap = mutableMapOf<Set<KnownLetter>, List<Pair<Set<KnownLetter>, String>>>()
-                    combs.chunked(combs.size / 4) { list ->
-                        async { list.groupBy { it.first } }
-                    }.forEach {
-                        accMap.putAll(it.await())
+                }.toList().forEach { (firstLast, deferred) ->
+                    val (firstChar, lastChar) = firstLast
+                    log.trace("chunk ${firstChar.toLowerCase()}${lastChar.toLowerCase()} end")
+                    deferred.await().forEach {
+                        it.forEach { (chars, word) ->
+                            val list = accMap[chars] ?: emptyList()
+                            accMap[chars] = list + word
+                        }
                     }
-                    accMap.toMap()
                 }
-//                val grouped: Map<Set<KnownLetter, List<Pair<Set<KnownLetter, String>>> = combs.groupBy { it.first }
-                log.info("Reducing")
-                val reduced = grouped.mapValues { (_, values) -> /*printThrottled("."); */values.map { it.second } }
-                log.info("Done in ${(System.nanoTime() - start) / 1000000000}s")
-                WordIndex(reduced, knownWords)
+                accMap.toMap()
             }
+            log.info("Done in ${(System.nanoTime() - start) / 1000000000}s")
+            WordIndex(index, knownWords)
         }
+    }
+
+    fun <K, V> Map<K, V>.mergeReduce(other: Map<K, V>, reduce: (V, V) -> V = { a, b -> b }): Map<K, V> {
+        val result = LinkedHashMap<K, V>(this.size + other.size)
+        result.putAll(this)
+        other.forEach { e -> result[e.key] = result[e.key]?.let { reduce(e.value, it) } ?: e.value }
+        return result
     }
 }
 

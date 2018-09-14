@@ -1,53 +1,69 @@
 package app
 
-import com.sun.corba.se.impl.util.RepositoryId.cache
 import org.slf4j.LoggerFactory
 import java.util.*
-import java.util.concurrent.atomic.AtomicLong
 
-abstract class Hangman(private val firstChar: Char, private val lastChar: Char, private val wordIndex: WordIndex) {
+abstract class Hangman {
     private val log = LoggerFactory.getLogger(javaClass)
 
     abstract suspend fun printString(str: String)
     abstract suspend fun readString(): String
     abstract suspend fun readInt(): Int
 
-    suspend fun start(knownLetters: Set<KnownLetter> = emptySet(), without: Set<Char> = emptySet()) {
-        log.info("[wordIndex : ${wordIndex.index}]")
-        log.info("[knownLetters: $knownLetters]")
-        val wordCandidates = wordIndex[knownLetters]?.filter { word -> without.intersect(word.toCharArray().toSet()).isEmpty() }
+    suspend fun start(firstChar: Char, lastChar: Char, wordIndex: WordIndex) =
+            start(listOf(KnownLetter.create(0, firstChar)), lastChar, wordIndex)
+
+    private suspend fun start(knownLetters: List<KnownLetter>, lastChar: Char, wordIndex: WordIndex, without: Set<Char> = emptySet()) {
+        log.debug("[wordIndex : ${wordIndex.index}]")
+        log.debug("[knownLetters: $knownLetters]")
+        val wordCandidates = wordIndex[knownLetters.asSequence().map { it.char }.toSet() + lastChar]
+                ?.asSequence()
+                ?.filter { word -> knownLetters.forAll { letter -> word.getOrNull(letter.index) == letter.char } }
+                ?.filter { word -> without.intersect(word.toCharArray().toSet()).isEmpty() }
+                ?.toList()
+        log.info("[wordCandidates: ${wordCandidates?.joinToString(" ")}]")
         if (wordCandidates?.size == 1) {
             printString("It's ${wordCandidates.first()}")
             printString("Bye.")
         } else {
-            val word = wordCandidates?.firstOrNull()
-            if (word == null) {
+            if (wordCandidates == null || wordCandidates.isEmpty()) {
                 printString("I don't know this word. I give up. You won! Congratulations!")
                 printString("Bye.")
             } else {
-                log.info("[word: $word]")
-                val letter = word.withIndex().drop(1).dropLast(1).dropWhile { (i, c) -> knownLetters.exists { it.index == i && it.char == c } }.firstOrNull()?.value
-                if (letter == null) {
-                    printString("It's $word")
+                val foundWord = wordCandidates.find { it.length == knownLetters.size + 1/*last char*/ }
+                if (foundWord != null) {
+                    printString("It's $foundWord")
                     printString("Bye.")
                 } else {
-                    printString(firstChar + knownLetters.sortedBy { it.index }.map { it.char }.joinToString("") + lastChar)
+                    val (letter, _) = pickLetter(wordCandidates)
+                    printString(knownLetters.asSequence().sortedBy { it.index }.map { it.char }.joinToString("") + lastChar)
                     printString("$letter ? (yes/no)")
                     val answer = readAnswer(knownLetters)
                     when (answer) {
                         is Answer.Yes -> {
                             val idx = answer.index
                             val nextLetters = knownLetters + KnownLetter.create(idx, letter)
-                            start(nextLetters, without)
+                            start(nextLetters, lastChar, wordIndex, without)
                         }
-                        is Answer.No -> start(knownLetters, without + letter)
+                        is Answer.No -> start(knownLetters, lastChar, wordIndex, without + letter)
                     }
                 }
             }
         }
     }
 
-    private suspend fun readAnswer(letters: Set<KnownLetter>): Answer {
+    fun pickLetter(words: List<String>): LetterCandidate {
+        val lettersFrequency = words.flatMap { word ->
+            word.toCharArray().drop(1).dropLast(1).toSet()
+        }.toList().groupBy { it }.mapValues { (_, values) -> values.size }.toList().sortedBy { it.second }
+        // Look for a letter, that is found in half of the words, so the answer to it will reduce our search candidates in half in the next loop.
+        // It may be actually done even better, not just look for middle, but find the least distant from words.size/2, but it's ok for now.
+        val (middleFrequentLetter, wordsCountWithIt) = lettersFrequency[lettersFrequency.size / 2]
+        log.debug("Letter: $middleFrequentLetter, found in $wordsCountWithIt words")
+        return LetterCandidate(middleFrequentLetter,  wordsCountWithIt)
+    }
+
+    private suspend fun readAnswer(letters: Iterable<KnownLetter>): Answer {
         return when (readString()) {
             "yes" -> Answer.Yes(readIdx(letters))
             "no" -> Answer.No
@@ -58,7 +74,7 @@ abstract class Hangman(private val firstChar: Char, private val lastChar: Char, 
         }
     }
 
-    private tailrec suspend fun readIdx(letters: Set<KnownLetter>): Int {
+    private tailrec suspend fun readIdx(letters: Iterable<KnownLetter>): Int {
         printString("Letter idx: ")
         val idx = readInt()
         val alreadyHaveThisIdx = letters.map { it.index }.contains(idx)
@@ -71,27 +87,23 @@ abstract class Hangman(private val firstChar: Char, private val lastChar: Char, 
     }
 }
 
+data class LetterCandidate(val letter: Char, val wordsCountWithIt: Int)
+
 sealed class Answer {
     data class Yes(val index: Int) : Answer()
     object No : Answer()
 }
 
 object KnownLetters {
-    private val tick = AtomicLong()
     val singleLetterCache = PerpetualCache()
-    fun create(letter: KnownLetter): Set<KnownLetter> {
-        val tickValue = tick.incrementAndGet()
-        if (tickValue % 300 == 0L) {
-            println("KnownLetters cache: " + singleLetterCache.size)
-        }
-        val key = KnownLetter.hash(letter.index, letter.char)
-        val existing = singleLetterCache.get(key)
+    fun create(char: Char): List<Char> {
+        val existing = singleLetterCache.get(char)
         return if (existing == null) {
-            val new = setOf(letter)
-            singleLetterCache[key] = new
+            val new = listOf(char)
+            singleLetterCache[char] = new
             new
         } else {
-            existing as Set<KnownLetter>
+            existing as List<Char>
         }
     }
 }
@@ -107,13 +119,8 @@ inline class KnownLetter(val arr: Array<Any>)/* : Serializable */ {
     companion object {
         fun hash(index: Int, char: Char) = Objects.hash(index, char)
 
-        private val tick = AtomicLong()
         private val cache = PerpetualCache()
         fun create(index: Int, char: Char): KnownLetter {
-            val tickValue = tick.incrementAndGet()
-            if (tickValue % 300 == 0L) {
-                println("KnownLetter cache: " + cache.size)
-            }
             val key = hash(index, char)
             val existing = cache.get(key)
             return if (existing == null) {
@@ -127,5 +134,9 @@ inline class KnownLetter(val arr: Array<Any>)/* : Serializable */ {
 //        private val serialVersionUID: Long = 1
     }
 }
+
+fun <T> Iterable<T>.forAll(pred: (T) -> Boolean): Boolean = find(not(pred)) == null
+
+fun <T> not(pred: (T) -> Boolean): (T) -> Boolean = { x -> !pred(x) }
 
 fun <T> Iterable<T>.exists(pred: (T) -> Boolean): Boolean = find(pred) != null
