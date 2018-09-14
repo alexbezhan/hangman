@@ -5,13 +5,13 @@ import java.io.*
 class WordIndex(val index: Map<Set<Char>, List<String>>) : Serializable {
     operator fun get(key: Set<Char>): List<String>? = index[key]
 
-    fun writeTo(file: File) {
+    fun writeTo(dir: File, firstLast: FirstLastChar) {
         ByteArrayOutputStream().use { bytesOutputStream ->
             val objectOutputStream = ObjectOutputStream(bytesOutputStream)
             objectOutputStream.writeObject(this)
             objectOutputStream.flush()
             val bytes = bytesOutputStream.toByteArray()
-            file.writeBytes(bytes)
+            indexFile(dir, firstLast).writeBytes(bytes)
         }
 
     }

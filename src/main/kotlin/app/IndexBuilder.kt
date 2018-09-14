@@ -7,8 +7,8 @@ import kotlinx.coroutines.experimental.runBlocking
 import org.slf4j.LoggerFactory
 import java.io.File
 
-object BuildIndex {
-    private val log = LoggerFactory.getLogger(BuildIndex::class.java)
+object IndexBuilder {
+    private val log = LoggerFactory.getLogger(IndexBuilder::class.java)
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -23,18 +23,23 @@ object BuildIndex {
                 file.readLines().map { it.trim() }
             }
         }
-        val indexes = buildIndexes(knownWords.take(1000))
+        buildAndPersist(indexDir, knownWords, 1000)
+    }
+
+    fun buildAndPersist(indexDir: File, knownWords: List<String>, chunkSize: Int) {
+        val indexes = knownWords.chunked(chunkSize).flatMap { build(it).toList() }
         indexes.map { (firstLast, index) ->
             val indexFile = WordIndex.indexFile(indexDir, firstLast)
             if (!indexFile.exists())
                 indexFile.createNewFile()
 
-            val combinedIndex = WordIndex.read(indexDir, firstLast)?.merge(index) ?: index
-            combinedIndex.writeTo(indexDir)
+            val indexFromFile = WordIndex.read(indexDir, firstLast)
+            val combinedIndex = indexFromFile?.let { index.merge(it) } ?: index
+            combinedIndex.writeTo(indexDir, firstLast)
         }
     }
 
-    fun buildIndexes(knownWords: List<String>): Map<FirstLastChar, WordIndex> {
+    fun build(knownWords: List<String>): Map<FirstLastChar, WordIndex> {
         tailrec fun combinations(word: String, firstLast: FirstLastChar, charIdx: Int, acc: List<List<Char>> = emptyList()): Set<Set<Char>> {
             val char = word.firstOrNull()
             return if (char == null) {

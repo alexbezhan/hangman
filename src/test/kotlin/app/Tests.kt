@@ -1,12 +1,13 @@
 package app
 
-import app.BuildIndex.buildIndexes
+import app.IndexBuilder.build
 import kotlinx.coroutines.experimental.GlobalScope
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
+import java.nio.file.Files
 
 class Tests {
     @Test
@@ -23,15 +24,23 @@ class Tests {
 
     @Test
     fun shouldBuildMultipleIndexes() {
-        val indexes = buildIndexes(listOf("god", "gord", "color", "colour"))
+        val indexes = build(listOf("god", "gord", "color", "colour"))
         assertEquals(2, indexes.size)
         assertEquals("{[g, d]=[god, gord], [g, d, o]=[god, gord], [g, d, r]=[gord], [g, d, o, r]=[gord]}", indexes[FirstLastChar('g', 'd')]!!.index.toString())
-        assertEquals("{[c, r]=[color, colour], [c, r, o]=[color, colour], [c, r, l]=[color, colour], [c, r, l, o]=[color, colour], [c, r, u]=[colour], [c, r, o, u]=[colour], [c, r, l, u]=[colour], [c, r, l, o, u]=[colour]}", indexes[FirstLastChar('c','r')]!!.index.toString())
+        assertEquals("{[c, r]=[color, colour], [c, r, o]=[color, colour], [c, r, l]=[color, colour], [c, r, l, o]=[color, colour], [c, r, u]=[colour], [c, r, o, u]=[colour], [c, r, l, u]=[colour], [c, r, l, o, u]=[colour]}", indexes[FirstLastChar('c', 'r')]!!.index.toString())
+    }
+
+    @Test
+    fun shouldBuildIndexesAndCombineFiles() {
+        val dir = Files.createTempDirectory("test-index").toFile().apply { deleteOnExit() }
+        IndexBuilder.buildAndPersist(dir, listOf("god", "gord", "color", "colour"), 1)
+        assertEquals("{[g, d]=[god, gord], [g, d, r]=[gord], [g, d, o]=[god, gord], [g, d, o, r]=[gord]}", WordIndex.read(dir, FirstLastChar('g', 'd'))!!.index.toString())
+        assertEquals("{[c, r]=[color, colour], [c, r, u]=[colour], [c, r, o]=[color, colour], [c, r, o, u]=[colour], [c, r, l]=[color, colour], [c, r, l, u]=[colour], [c, r, l, o]=[color, colour], [c, r, l, o, u]=[colour]}", WordIndex.read(dir, FirstLastChar('c', 'r'))!!.index.toString())
     }
 
     @Test
     fun shouldBuildIndexFromRealFile() {
-        val index = buildIndexes(readTestWords())[FirstLastChar('c', 's')]!!
+        val index = build(readTestWords())[FirstLastChar('c', 's')]!!
         assertEquals(listOf("cheque's", "cheques", "colourss", "colour's", "colours"), index[setOf('c', 's')])
         assertEquals(listOf("cheque's", "cheques"), index[setOf('c', 'q', 's')])
         assertEquals(listOf("colourss", "colour's", "colours"), index[setOf('c', 'l', 's')])
@@ -41,7 +50,7 @@ class Tests {
     fun shouldGuessUsingIndexFromRealFile() {
         val hangman = TestHangman()
         val hangmanJob = GlobalScope.launch {
-            hangman.start('c', 's', buildIndexes(readTestWords())[FirstLastChar('c','s')]!!)
+            hangman.start('c', 's', build(readTestWords())[FirstLastChar('c', 's')]!!)
         }
         runBlocking {
             hangman.assertRound("cs", '\'', Answer.Yes(6))
@@ -96,7 +105,7 @@ class Tests {
     }
 
     private fun buildIndex(words: List<String>): WordIndex =
-            buildIndexes(words)[FirstLastChar(words.first().first(), words.first().last())]!!
+            build(words)[FirstLastChar(words.first().first(), words.first().last())]!!
 
     private fun readTestWords(): List<String> =
             javaClass.getResource("/test-words/canadian-words.10")?.let { File(it.toURI()) }?.let { file ->
