@@ -21,9 +21,9 @@ object Main {
 
         runBlocking {
             object : Hangman(firstChar, lastChar, listOf("abao", "aabo")/*knownWords TODO*/) {
-                override suspend fun pushString(str: String) = println(str)
-                override suspend fun pullString(): String = Scanner(System.`in`).next().trim()
-                override suspend fun pullInt(): Int = Scanner(System.`in`).nextInt()
+                override suspend fun printString(str: String) = println(str)
+                override suspend fun readString(): String = Scanner(System.`in`).next().trim()
+                override suspend fun readInt(): Int = Scanner(System.`in`).nextInt()
             }.start()
         }
     }
@@ -32,9 +32,9 @@ object Main {
 abstract class Hangman(private val firstChar: Char, private val lastChar: Char, knownWords: List<String>) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    abstract suspend fun pushString(str: String)
-    abstract suspend fun pullString(): String
-    abstract suspend fun pullInt(): Int
+    abstract suspend fun printString(str: String)
+    abstract suspend fun readString(): String
+    abstract suspend fun readInt(): Int
 
     private val wordIndex: WordIndex = buildIndex(firstChar, lastChar, knownWords)
 
@@ -43,22 +43,22 @@ abstract class Hangman(private val firstChar: Char, private val lastChar: Char, 
         log.debug("[knownLetters: $knownLetters]")
         val wordCandidates = wordIndex[knownLetters]?.filter { word -> without.intersect(word.toCharArray().toSet()).isEmpty() }
         if (wordCandidates?.size == 1) {
-            pushString("It's ${wordCandidates.first()}")
-            pushString("Bye.")
+            printString("It's ${wordCandidates.first()}")
+            printString("Bye.")
         } else {
             val word = wordCandidates?.firstOrNull()
             if (word == null) {
-                pushString("I don't know this word. I give up. You won! Congratulations!")
-                pushString("Bye.")
+                printString("I don't know this word. I give up. You won! Congratulations!")
+                printString("Bye.")
             } else {
                 log.debug("[word: $word]")
                 val letter = word.withIndex().drop(1).dropLast(1).dropWhile { (i, c) -> knownLetters.exists { it.index == i && it.char == c } }.firstOrNull()?.value
                 if (letter == null) {
-                    pushString("It's $word")
-                    pushString("Bye.")
+                    printString("It's $word")
+                    printString("Bye.")
                 } else {
-                    pushString(firstChar + knownLetters.sortedBy { it.index }.map { it.char }.joinToString("") + lastChar)
-                    pushString("$letter ? (yes/no)")
+                    printString(firstChar + knownLetters.sortedBy { it.index }.map { it.char }.joinToString("") + lastChar)
+                    printString("$letter ? (yes/no)")
                     val answer = readAnswer(knownLetters)
                     when (answer) {
                         is Answer.Yes -> {
@@ -74,22 +74,22 @@ abstract class Hangman(private val firstChar: Char, private val lastChar: Char, 
     }
 
     private suspend fun readAnswer(letters: Set<KnownLetter>): Answer {
-        return when (pullString()) {
+        return when (readString()) {
             "yes" -> Answer.Yes(readIdx(letters))
             "no" -> Answer.No
             else -> {
-                pushString("Wrong answer. Try again")
+                printString("Wrong answer. Try again")
                 readAnswer(letters)
             }
         }
     }
 
     private tailrec suspend fun readIdx(letters: Set<KnownLetter>): Int {
-        pushString("Letter idx: ")
-        val idx = pullInt()
+        printString("Letter idx: ")
+        val idx = readInt()
         val alreadyHaveThisIdx = letters.map { it.index }.contains(idx)
         return if (idx < 0 || alreadyHaveThisIdx) {
-            pushString("Wrong pos")
+            printString("Wrong pos")
             readIdx(letters)
         } else {
             idx

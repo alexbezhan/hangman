@@ -10,18 +10,18 @@ class TestHangman(firstChar: Char, lastChar: Char, knownWords: List<String>) : H
     val input = Channel<String>(1)
     val output = Channel<String>(1)
 
-    override suspend fun pushString(str: String) {
+    override suspend fun printString(str: String) {
         log.debug("output: $str")
         output.send(str)
     }
 
-    override suspend fun pullString(): String {
+    override suspend fun readString(): String {
         val str = input.receive()
         log.debug("input: $str")
         return str
     }
 
-    override suspend fun pullInt(): Int {
+    override suspend fun readInt(): Int {
         val i = input.receive().toInt()
         log.debug("input: $i")
         return i
