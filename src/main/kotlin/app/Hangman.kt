@@ -24,7 +24,7 @@ object Main {
                 override suspend fun pushString(str: String) = println(str)
                 override suspend fun pullString(): String = Scanner(System.`in`).next().trim()
                 override suspend fun pullInt(): Int = Scanner(System.`in`).nextInt()
-            }.round()
+            }.start()
         }
     }
 }
@@ -36,34 +36,38 @@ abstract class Hangman(private val firstChar: Char, private val lastChar: Char, 
     abstract suspend fun pullString(): String
     abstract suspend fun pullInt(): Int
 
-    private val wordIndex = buildIndex(firstChar, lastChar, knownWords)
+    private val wordIndex: WordIndex = buildIndex(firstChar, lastChar, knownWords)
 
-    suspend fun round(knownLetters: Set<KnownLetter> = emptySet(), without: Set<Char> = emptySet()) {
+    suspend fun start(knownLetters: Set<KnownLetter> = emptySet(), without: Set<Char> = emptySet()) {
         log.debug("[wordIndex : ${wordIndex.index}]")
-        val word = run {
-            log.debug("[knownLetters: $knownLetters]")
-            wordIndex[knownLetters]?.find { word -> !without.exists { word.contains(it) } }
-        }
-        pushString(firstChar + knownLetters.sortedBy { it.index }.map { it.char }.joinToString("") + lastChar)
-        if (word == null) {
-            pushString("I don't know this word. I give up. You won! Congratulations!")
+        log.debug("[knownLetters: $knownLetters]")
+        val wordCandidates = wordIndex[knownLetters]?.filter { word -> without.intersect(word.toCharArray().toSet()).isEmpty() }
+        if (wordCandidates?.size == 1) {
+            pushString("It's ${wordCandidates.first()}")
             pushString("Bye.")
         } else {
-            log.debug("[word: $word]")
-            val letter = word.withIndex().drop(1).dropLast(1).dropWhile { (i, c) -> knownLetters.exists { it.index == i && it.char == c } }.firstOrNull()?.value
-            if (letter == null) {
-                pushString("It's $word")
+            val word = wordCandidates?.firstOrNull()
+            if (word == null) {
+                pushString("I don't know this word. I give up. You won! Congratulations!")
                 pushString("Bye.")
             } else {
-                pushString("$letter ? (yes/no)")
-                val answer = readAnswer(knownLetters)
-                when (answer) {
-                    is Answer.Yes -> {
-                        val idx = answer.index
-                        val nextLetters = knownLetters + KnownLetter(idx, letter)
-                        round(nextLetters, without)
+                log.debug("[word: $word]")
+                val letter = word.withIndex().drop(1).dropLast(1).dropWhile { (i, c) -> knownLetters.exists { it.index == i && it.char == c } }.firstOrNull()?.value
+                if (letter == null) {
+                    pushString("It's $word")
+                    pushString("Bye.")
+                } else {
+                    pushString(firstChar + knownLetters.sortedBy { it.index }.map { it.char }.joinToString("") + lastChar)
+                    pushString("$letter ? (yes/no)")
+                    val answer = readAnswer(knownLetters)
+                    when (answer) {
+                        is Answer.Yes -> {
+                            val idx = answer.index
+                            val nextLetters = knownLetters + KnownLetter(idx, letter)
+                            start(nextLetters, without)
+                        }
+                        is Answer.No -> start(knownLetters, without + letter)
                     }
-                    is Answer.No -> round(knownLetters, without + letter)
                 }
             }
         }

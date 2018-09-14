@@ -1,0 +1,9 @@
+<configuration>
+
+    <root level="DEBUG">
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+    <logger name="app" level="INFO"/>
+
+</configuration>

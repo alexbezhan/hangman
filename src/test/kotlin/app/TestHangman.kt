@@ -37,14 +37,12 @@ class TestHangman(firstChar: Char, lastChar: Char, knownWords: List<String>) : H
         }
     }
 
-    suspend fun assertLose(word: String) {
-        assertEquals(word, output.receive())
+    suspend fun assertLose() {
         assertEquals("I don't know this word. I give up. You won! Congratulations!", output.receive())
         assertEquals("Bye.", output.receive())
     }
 
     suspend fun assertWin(word: String) {
-        assertEquals(word, output.receive())
         assertEquals("It's $word", output.receive())
         assertEquals("Bye.", output.receive())
     }
