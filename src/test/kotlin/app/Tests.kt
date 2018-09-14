@@ -1,5 +1,6 @@
 package app
 
+import app.BuildIndex.buildIndex
 import kotlinx.coroutines.experimental.GlobalScope
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
@@ -11,7 +12,7 @@ class Tests {
     fun shouldBuildIndex() {
         assertEquals(
                 "{[1:o]=[god, gord], [1:o, 2:r]=[gord], [2:r]=[gord], [1:g]=[ggod], [1:g, 2:o]=[ggod], [2:o]=[ggod]}",
-                buildIndex('g', 'd', listOf("god", "gord", "ggod")).index.toString())
+                buildIndex(listOf("god", "gord", "ggod")).index.toString())
     }
 
     @Test

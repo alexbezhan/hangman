@@ -1,10 +1,11 @@
 package app
 
+import app.BuildIndex.buildIndex
 import kotlinx.coroutines.experimental.channels.Channel
 import org.junit.Assert.assertEquals
 import org.slf4j.LoggerFactory
 
-class TestHangman(firstChar: Char, lastChar: Char, knownWords: List<String>) : Hangman(firstChar, lastChar, knownWords) {
+class TestHangman(firstChar: Char, lastChar: Char, knownWords: List<String>) : Hangman(firstChar, lastChar, buildIndex(knownWords)) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     val input = Channel<String>(1)
