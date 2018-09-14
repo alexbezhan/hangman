@@ -2,10 +2,8 @@ package app
 
 import java.io.*
 
-class WordIndex(val index: Map<Set<Char>, List<String>>, val allWords: List<String>) : Serializable {
-    operator fun get(key: Set<Char>): List<String>? =
-            if (key.isEmpty()) allWords
-            else index[key]
+class WordIndex(val index: Map<Set<Char>, List<String>>) : Serializable {
+    operator fun get(key: Set<Char>): List<String>? = index[key]
 
     fun writeTo(file: File) {
         ByteArrayOutputStream().use { bytesOutputStream ->
@@ -18,17 +16,35 @@ class WordIndex(val index: Map<Set<Char>, List<String>>, val allWords: List<Stri
 
     }
 
+    fun merge(other: WordIndex): WordIndex =
+            WordIndex(index.mergeReduce(other.index) { wordsA, wordsB ->
+                wordsA + wordsB
+            })
+
     companion object {
         private val serialVersionUID: Long = 1
 
-        fun readFrom(file: File): WordIndex? =
-                if (!file.exists()) {
-                    null
-                } else {
-                    val bis = ByteArrayInputStream(file.readBytes())
-                    ObjectInputStream(bis).use { oin ->
-                        oin.readObject() as WordIndex
-                    }
-                }
+        val indexDir = File(".word-index")
+
+        fun indexFile(dir: File, firstLast: FirstLastChar) = File(dir, "${firstLast.firstChar}${firstLast.lastChar}")
+
+        fun read(dir: File, firstLast: FirstLastChar): WordIndex? {
+            if (!dir.exists()) return null
+
+            val fileBytes = indexFile(dir, firstLast).readBytes()
+            if (fileBytes.isEmpty()) return null
+
+            val bis = ByteArrayInputStream(fileBytes)
+            return ObjectInputStream(bis).use { oin ->
+                oin.readObject() as WordIndex
+            }
+        }
     }
+}
+
+fun <K, V> Map<K, V>.mergeReduce(other: Map<K, V>, reduce: (V, V) -> V = { a, b -> b }): Map<K, V> {
+    val result = LinkedHashMap<K, V>(this.size + other.size)
+    result.putAll(this)
+    other.forEach { e -> result[e.key] = result[e.key]?.let { reduce(e.value, it) } ?: e.value }
+    return result
 }

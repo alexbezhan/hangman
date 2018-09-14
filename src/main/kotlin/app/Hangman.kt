@@ -135,6 +135,8 @@ inline class KnownLetter(val arr: Array<Any>)/* : Serializable */ {
     }
 }
 
+data class FirstLastChar(val firstChar: Char, val lastChar: Char)
+
 fun <T> Iterable<T>.forAll(pred: (T) -> Boolean): Boolean = find(not(pred)) == null
 
 fun <T> not(pred: (T) -> Boolean): (T) -> Boolean = { x -> !pred(x) }

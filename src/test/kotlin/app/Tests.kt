@@ -1,6 +1,6 @@
 package app
 
-import app.BuildIndex.buildIndex
+import app.BuildIndex.buildIndexes
 import kotlinx.coroutines.experimental.GlobalScope
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
@@ -22,8 +22,16 @@ class Tests {
     }
 
     @Test
+    fun shouldBuildMultipleIndexes() {
+        val indexes = buildIndexes(listOf("god", "gord", "color", "colour"))
+        assertEquals(2, indexes.size)
+        assertEquals("{[g, d]=[god, gord], [g, d, o]=[god, gord], [g, d, r]=[gord], [g, d, o, r]=[gord]}", indexes[FirstLastChar('g', 'd')]!!.index.toString())
+        assertEquals("{[c, r]=[color, colour], [c, r, o]=[color, colour], [c, r, l]=[color, colour], [c, r, l, o]=[color, colour], [c, r, u]=[colour], [c, r, o, u]=[colour], [c, r, l, u]=[colour], [c, r, l, o, u]=[colour]}", indexes[FirstLastChar('c','r')]!!.index.toString())
+    }
+
+    @Test
     fun shouldBuildIndexFromRealFile() {
-        val index = buildIndex(readTestWords())
+        val index = buildIndexes(readTestWords())[FirstLastChar('c', 's')]!!
         assertEquals(listOf("cheque's", "cheques", "colourss", "colour's", "colours"), index[setOf('c', 's')])
         assertEquals(listOf("cheque's", "cheques"), index[setOf('c', 'q', 's')])
         assertEquals(listOf("colourss", "colour's", "colours"), index[setOf('c', 'l', 's')])
@@ -33,7 +41,7 @@ class Tests {
     fun shouldGuessUsingIndexFromRealFile() {
         val hangman = TestHangman()
         val hangmanJob = GlobalScope.launch {
-            hangman.start('c', 's', buildIndex(readTestWords()))
+            hangman.start('c', 's', buildIndexes(readTestWords())[FirstLastChar('c','s')]!!)
         }
         runBlocking {
             hangman.assertRound("cs", '\'', Answer.Yes(6))
@@ -86,6 +94,9 @@ class Tests {
             hangmanJob.join()
         }
     }
+
+    private fun buildIndex(words: List<String>): WordIndex =
+            buildIndexes(words)[FirstLastChar(words.first().first(), words.first().last())]!!
 
     private fun readTestWords(): List<String> =
             javaClass.getResource("/test-words/canadian-words.10")?.let { File(it.toURI()) }?.let { file ->
