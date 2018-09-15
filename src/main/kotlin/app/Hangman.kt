@@ -1,7 +1,7 @@
 package app
 
 import org.slf4j.LoggerFactory
-import java.util.*
+import java.lang.Math.abs
 
 abstract class Hangman {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -14,13 +14,13 @@ abstract class Hangman {
             start(listOf(KnownLetter(0, firstChar)), lastChar, wordIndex)
 
     private suspend fun start(knownLetters: List<KnownLetter>, lastChar: Char, wordIndex: WordIndex, without: Set<Char> = emptySet()) {
-        log.debug("[wordIndex : ${wordIndex.index}]")
+        log.trace("[wordIndex : ${wordIndex.index}]")
         log.debug("[knownLetters: $knownLetters]")
         val wordCandidates = wordIndex[knownLetters.asSequence().map { it.char }.toSet() + lastChar]?.asSequence()
                 ?.filter { word -> knownLetters.forAll { letter -> word.toLowerCase().getOrNull(letter.index) == letter.char } }
-                ?.filter { word -> without.intersect(word.toLowerCase().toCharArray().toSet()).isEmpty() }
+                ?.filter { word -> without.intersect(unknownLetters(word, knownLetters).toSet().map { it.value }).isEmpty() }
                 ?.toList()
-        log.info("[wordCandidates: ${wordCandidates?.joinToString(" ")}]")
+        log.debug("[wordCandidates: ${wordCandidates?.joinToString(" ")}]")
         if (wordCandidates?.size == 1) {
             printString("It's ${wordCandidates.first()}")
             printString("Bye.")
@@ -47,14 +47,26 @@ abstract class Hangman {
 
     fun pickLetter(words: List<String>, knownLetters: List<KnownLetter>): LetterCandidate {
         val lettersFrequency = words.flatMap { word ->
-            word.toLowerCase().toCharArray().dropLast(1).asSequence().withIndex().dropWhile { (i, c) -> knownLetters.exists { it.index == i && it.char == c } }.map { it.value }.toSet()
+            unknownLetters(word, knownLetters).map { it.value }.toSet()
         }.toList().groupBy { it }.mapValues { (_, values) -> values.size }.toList().sortedBy { it.second }
-        // Look for a letter, that is found in half of the words, so the answer to it will reduce our search candidates in half in the next loop.
-        // It may be actually done even better, not just look for middle, but find the least distant from words.size/2, but it's ok for now.
-        val (middleFrequentLetter, wordsCountWithIt) = lettersFrequency[lettersFrequency.size / 2]
-        log.debug("Letter: $middleFrequentLetter, found in $wordsCountWithIt words")
-        return LetterCandidate(middleFrequentLetter, wordsCountWithIt)
+
+        // Least distant letter from words.size/2 means we are getting closer to O(log n) in picking the right word.
+        // Would be awesome to calculate the same thing, but for all 'subwords' and find the least distant 'subword'. This would make the guess far more smarter.
+        // Plus we could introuce some kind of weights system, where we know the frequency with which the word has been used.
+        val wordsHalfSize = words.size / 2
+        val (leastDistantLetter, letterFrequency) = lettersFrequency.fold(lettersFrequency.first().first to words.size) { acc, x ->
+            val (_, accFrequency) = acc
+            val (_, frequency) = x
+            if (abs(frequency - wordsHalfSize) < abs(accFrequency - wordsHalfSize)) x
+            else acc
+        }
+        log.debug("Letter: $leastDistantLetter, found in $letterFrequency words")
+        return LetterCandidate(leastDistantLetter, letterFrequency)
     }
+
+    private fun unknownLetters(word: String, knownLetters: List<KnownLetter>): Sequence<IndexedValue<Char>> =
+            word.toLowerCase().toCharArray().drop(1).dropLast(1)
+                    .asSequence().withIndex().dropWhile { (i, c) -> knownLetters.exists { it.index == i && it.char == c } }
 
     private suspend fun readAnswer(letters: Iterable<KnownLetter>): Answer {
         return when (readString()) {

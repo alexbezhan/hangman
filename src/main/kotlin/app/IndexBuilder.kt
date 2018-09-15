@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 object IndexBuilder {
     private val log = LoggerFactory.getLogger(IndexBuilder::class.java)
-    val indexDir = File("/Users/alex/source/hangman/.word-index")
+    val indexDir = File(".word-index")
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -22,7 +22,7 @@ object IndexBuilder {
 
         log.info("Reading words")
         val knownWords = run {
-            val wordsDir = File("/Users/alex/source/hangman/src/main/resources/words")
+            val wordsDir = File("words")
             wordsDir.listFiles().flatMap { file ->
                 file.readLines().map { it.trim() }
             }

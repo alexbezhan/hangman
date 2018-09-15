@@ -8,6 +8,6 @@
         <appender-ref ref="STDOUT"/>
     </root>
 
-    <logger name="app" level="INFO"/>
+    <logger name="app" level="DEBUG"/>
 
 </configuration>

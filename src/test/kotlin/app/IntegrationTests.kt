@@ -28,4 +28,45 @@ class IntegrationTests {
             hangmanJob.join()
         }
     }
+
+    @Test
+    fun shouldGuessTheWordPickingLettersWithLeastDistance() {
+        val firstLast = FirstLastChar('b', 'n')
+        val wordIndex = WordIndex.read(IndexBuilder.indexDir, firstLast)!!
+        val hangman = TestHangman()
+        val hangmanJob = GlobalScope.launch { hangman.start('b', 'n', wordIndex) }
+        runBlocking {
+            hangman.assertRound("bn", 'e', Answer.Yes(4))
+            hangman.assertRound("ben", 'o', Answer.No)
+            hangman.assertRound("ben", 'r', Answer.Yes(2))
+            hangman.assertRound("bren", 'i', Answer.Yes(6))
+            hangman.assertRound("brein", 'b', Answer.Yes(3))
+            hangman.assertRound("brbein", 'a', Answer.Yes(7))
+            hangman.assertWin("Berberian")
+            hangmanJob.join()
+        }
+    }
+
+    @Test
+    fun shouldGuessTheWordPickingLettersWithLeastDistance2() {
+        val firstLast = FirstLastChar('c', 'r')
+        val wordIndex = WordIndex.read(IndexBuilder.indexDir, firstLast)!!
+        val hangman = TestHangman()
+        val hangmanJob = GlobalScope.launch { hangman.start('c', 'r', wordIndex) }
+        runBlocking {
+            hangman.assertRound("cr", 'a', Answer.No)
+            hangman.assertRound("cr", 'i', Answer.No)
+            hangman.assertRound("cr", 'r', Answer.No)
+            hangman.assertRound("cr", 'l', Answer.No)
+            hangman.assertRound("cr", 'n', Answer.Yes(2))
+            hangman.assertRound("cnr", 't', Answer.Yes(3))
+            hangman.assertRound("cntr", 'm', Answer.No)
+            hangman.assertRound("cntr", 'o', Answer.No)
+            hangman.assertRound("cntr", 'g', Answer.No)
+            hangman.assertRound("cntr", 'e', Answer.Yes(1))
+            hangman.assertRound("centr", 'e', Answer.Yes(4))
+            hangman.assertWin("center")
+            hangmanJob.join()
+        }
+    }
 }
