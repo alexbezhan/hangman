@@ -2,6 +2,9 @@ package app
 
 import java.io.*
 
+/**
+ * We could also save some more memory by converting Set<Char> to a string with sorted chars
+ */
 class WordIndex(val index: Map<Set<Char>, List<String>>) : Serializable {
     operator fun get(key: Set<Char>): List<String>? = index[key]
 
