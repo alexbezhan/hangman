@@ -1,6 +1,6 @@
 package app
 
-import app.WordIndex.Companion.indexDir
+import app.IndexBuilder.indexDir
 import kotlinx.coroutines.experimental.runBlocking
 import java.util.*
 

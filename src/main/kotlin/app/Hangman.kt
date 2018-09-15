@@ -11,7 +11,7 @@ abstract class Hangman {
     abstract suspend fun readInt(): Int
 
     suspend fun start(firstChar: Char, lastChar: Char, wordIndex: WordIndex) =
-            start(listOf(KnownLetter.create(0, firstChar)), lastChar, wordIndex)
+            start(listOf(KnownLetter(0, firstChar)), lastChar, wordIndex)
 
     private suspend fun start(knownLetters: List<KnownLetter>, lastChar: Char, wordIndex: WordIndex, without: Set<Char> = emptySet()) {
         log.debug("[wordIndex : ${wordIndex.index}]")
@@ -36,7 +36,7 @@ abstract class Hangman {
                 when (answer) {
                     is Answer.Yes -> {
                         val idx = answer.index
-                        val nextLetters = knownLetters + KnownLetter.create(idx, letter)
+                        val nextLetters = knownLetters + KnownLetter(idx, letter)
                         start(nextLetters, lastChar, wordIndex, without)
                     }
                     is Answer.No -> start(knownLetters, lastChar, wordIndex, without + letter)
@@ -87,45 +87,8 @@ sealed class Answer {
     object No : Answer()
 }
 
-object KnownLetters {
-    val singleLetterCache = PerpetualCache()
-    fun create(char: Char): List<Char> {
-        val existing = singleLetterCache.get(char)
-        return if (existing == null) {
-            val new = listOf(char)
-            singleLetterCache[char] = new
-            new
-        } else {
-            existing as List<Char>
-        }
-    }
-}
-
-inline class KnownLetter(val arr: Array<Any>)/* : Serializable */ {
-    val index: Int
-        get() = arr[0] as Int
-    val char: Char
-        get() = arr[1] as Char
-
+data class KnownLetter(val index: Int, val char: Char) {
     override fun toString(): String = "$index:$char"
-
-    companion object {
-        fun hash(index: Int, char: Char) = Objects.hash(index, char)
-
-        private val cache = PerpetualCache()
-        fun create(index: Int, char: Char): KnownLetter {
-            val key = hash(index, char)
-            val existing = cache.get(key)
-            return if (existing == null) {
-                val new = KnownLetter(arrayOf(index, char))
-                cache[key] = new
-                new
-            } else {
-                existing as KnownLetter
-            }
-        }
-//        private val serialVersionUID: Long = 1
-    }
 }
 
 data class FirstLastChar(val firstChar: Char, val lastChar: Char)

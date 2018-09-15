@@ -16,25 +16,61 @@ class Tests {
 
     @Test
     fun shouldBuildIndex() {
-        assertEquals(
-                "{[g, d]=[god, gord, ggod], [g, d, o]=[god, gord, ggod], [g, d, r]=[gord], [g, d, o, r]=[gord]}",
-                buildIndex(listOf("god", "gord", "ggod")).index.toString())
+        val index = buildIndex(listOf("god", "gord", "ggod")).index
+        assertEquals(4, index.size)
+        assertEquals(listOf("god", "gord", "ggod"), index[setOf('g', 'd')])
+        assertEquals(listOf("god", "gord", "ggod"), index[setOf('g', 'd', 'o')])
+        assertEquals(listOf("gord"), index[setOf('g', 'd', 'r')])
+        assertEquals(listOf("gord"), index[setOf('g', 'd', 'o', 'r')])
     }
 
     @Test
     fun shouldBuildMultipleIndexes() {
         val indexes = IndexBuilder.build(listOf("god", "gord", "color", "colour"))
         assertEquals(2, indexes.size)
-        assertEquals("{[g, d]=[god, gord], [g, d, o]=[god, gord], [g, d, r]=[gord], [g, d, o, r]=[gord]}", indexes[FirstLastChar('g', 'd')]!!.index.toString())
-        assertEquals("{[c, r]=[color, colour], [c, r, o]=[color, colour], [c, r, l]=[color, colour], [c, r, l, o]=[color, colour], [c, r, u]=[colour], [c, r, o, u]=[colour], [c, r, l, u]=[colour], [c, r, l, o, u]=[colour]}", indexes[FirstLastChar('c', 'r')]!!.index.toString())
+
+        val gd = indexes[FirstLastChar('g', 'd')]!!.index
+        assertEquals(4, gd.size)
+        assertEquals(listOf("god", "gord"), gd[setOf('g', 'd')])
+        assertEquals(listOf("god", "gord"), gd[setOf('g', 'd', 'o')])
+        assertEquals(listOf("gord"), gd[setOf('g', 'd', 'r')])
+        assertEquals(listOf("gord"), gd[setOf('g', 'd', 'r', 'o')])
+
+        val cr = indexes[FirstLastChar('c', 'r')]!!.index
+        assertEquals(8, cr.size)
+        assertEquals(listOf("color", "colour"), cr[setOf('c', 'r')])
+        assertEquals(listOf("color", "colour"), cr[setOf('c', 'r', 'o')])
+        assertEquals(listOf("color", "colour"), cr[setOf('c', 'r', 'l')])
+        assertEquals(listOf("color", "colour"), cr[setOf('c', 'r', 'l', 'o')])
+        assertEquals(listOf("colour"), cr[setOf('c', 'r', 'u')])
+        assertEquals(listOf("colour"), cr[setOf('c', 'r', 'o', 'u')])
+        assertEquals(listOf("colour"), cr[setOf('c', 'r', 'l', 'u')])
+        assertEquals(listOf("colour"), cr[setOf('c', 'r', 'l', 'o', 'u')])
     }
 
     @Test
     fun shouldBuildIndexesAndCombineFiles() {
         val dir = Files.createTempDirectory("test-index").toFile().apply { deleteOnExit() }
-        IndexBuilder.buildAndPersist(dir, listOf("god", "gord", "color", "colour"), 1)
-        assertEquals("{[g, d]=[god, gord], [g, d, r]=[gord], [g, d, o]=[god, gord], [g, d, o, r]=[gord]}", WordIndex.read(dir, FirstLastChar('g', 'd'))!!.index.toString())
-        assertEquals("{[c, r]=[color, colour], [c, r, u]=[colour], [c, r, o]=[color, colour], [c, r, o, u]=[colour], [c, r, l]=[color, colour], [c, r, l, u]=[colour], [c, r, l, o]=[color, colour], [c, r, l, o, u]=[colour]}", WordIndex.read(dir, FirstLastChar('c', 'r'))!!.index.toString())
+        IndexBuilder.buildAndPersist(dir, listOf("god", "gord", "color", "colour"), 1, 0, 4)
+
+        val gd = WordIndex.read(dir, FirstLastChar('g', 'd'))!!.index
+        println(gd)
+        assertEquals(4, gd.size)
+        assertEquals(listOf("god", "gord"), gd[setOf('g', 'd')])
+        assertEquals(listOf("god", "gord"), gd[setOf('g', 'd', 'o')])
+        assertEquals(listOf("gord"), gd[setOf('g', 'd', 'r')])
+        assertEquals(listOf("gord"), gd[setOf('g', 'd', 'r', 'o')])
+
+        val cr = WordIndex.read(dir, FirstLastChar('c', 'r'))!!.index
+        assertEquals(8, cr.size)
+        assertEquals(listOf("color", "colour"), cr[setOf('c', 'r')])
+        assertEquals(listOf("color", "colour"), cr[setOf('c', 'r', 'o')])
+        assertEquals(listOf("color", "colour"), cr[setOf('c', 'r', 'l')])
+        assertEquals(listOf("color", "colour"), cr[setOf('c', 'r', 'l', 'o')])
+        assertEquals(listOf("colour"), cr[setOf('c', 'r', 'u')])
+        assertEquals(listOf("colour"), cr[setOf('c', 'r', 'o', 'u')])
+        assertEquals(listOf("colour"), cr[setOf('c', 'r', 'l', 'u')])
+        assertEquals(listOf("colour"), cr[setOf('c', 'r', 'l', 'o', 'u')])
     }
 
     @Test

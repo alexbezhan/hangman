@@ -1,13 +1,18 @@
 buildscript {
+    ext.kotlin_version = "1.2.61"
     repositories {
         jcenter()
         maven { url 'http://dl.bintray.com/kotlin/kotlin-eap' }
     }
+    dependencies {
+        classpath 'com.github.jengelman.gradle.plugins:shadow:2.0.4'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
 }
-plugins {
-    id 'java'
-    id 'org.jetbrains.kotlin.jvm' version '1.2.61'
-}
+
+apply plugin: 'application'
+apply plugin: 'kotlin'
+apply plugin: 'com.github.johnrengelman.shadow'
 
 group 'com.alexbezhan'
 version '1.0-SNAPSHOT'
@@ -24,12 +29,10 @@ dependencies {
     implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.2.3'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:0.26.0'
     testCompile group: 'junit', name: 'junit', version: '4.12'
-
 }
 
 compileKotlin {
     kotlinOptions.jvmTarget = "1.8"
-    kotlinOptions.freeCompilerArgs = ['-XXLanguage:+InlineClasses']
 }
 compileTestKotlin {
     kotlinOptions.jvmTarget = "1.8"
@@ -39,3 +42,5 @@ kotlin {
         coroutines "enable"
     }
 }
+
+mainClassName = 'app.IndexBuilder'

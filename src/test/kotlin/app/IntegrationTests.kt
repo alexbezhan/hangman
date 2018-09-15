@@ -17,7 +17,7 @@ class IntegrationTests {
             }
         }
         val indexDir = Files.createTempDirectory("test-index").toFile().apply { deleteOnExit() }
-        IndexBuilder.buildAndPersist(indexDir, knownWords, 1000)
+        IndexBuilder.buildAndPersist(indexDir, knownWords, 1000, 0,1000 )
         val wordIndex = WordIndex.read(indexDir, FirstLastChar('b', 'd'))!!
         val hangman = TestHangman()
         val hangmanJob = GlobalScope.launch { hangman.start('b', 'd', wordIndex) }

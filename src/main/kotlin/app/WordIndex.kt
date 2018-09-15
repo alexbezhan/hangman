@@ -24,8 +24,6 @@ class WordIndex(val index: Map<Set<Char>, List<String>>) : Serializable {
     companion object {
         private val serialVersionUID: Long = 1
 
-        val indexDir = File(".word-index")
-
         fun indexFile(dir: File, firstLast: FirstLastChar) = File(dir, "${firstLast.firstChar}${firstLast.lastChar}")
 
         fun read(dir: File, firstLast: FirstLastChar): WordIndex? {

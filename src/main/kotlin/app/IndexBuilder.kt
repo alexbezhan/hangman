@@ -1,14 +1,18 @@
 package app
 
-import app.WordIndex.Companion.indexDir
 import kotlinx.coroutines.experimental.async
 import kotlinx.coroutines.experimental.newFixedThreadPoolContext
 import kotlinx.coroutines.experimental.runBlocking
 import org.slf4j.LoggerFactory
 import java.io.File
+import java.lang.ref.ReferenceQueue
+import java.lang.ref.SoftReference
+import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 object IndexBuilder {
     private val log = LoggerFactory.getLogger(IndexBuilder::class.java)
+    val indexDir = File("/Users/alex/source/hangman/.word-index")
 
     @JvmStatic
     fun main(args: Array<String>) {
@@ -18,57 +22,61 @@ object IndexBuilder {
 
         log.info("Reading words")
         val knownWords = run {
-            val wordsDir = javaClass.getResource("/words")?.let { File(it.toURI()) } ?: error("words dir not found")
+            val wordsDir = File("/Users/alex/source/hangman/src/main/resources/words")
             wordsDir.listFiles().flatMap { file ->
                 file.readLines().map { it.trim() }
             }
         }
-        buildAndPersist(indexDir, knownWords, 100)
+        val chunkSize = args[0].toInt()
+        val drop = args[1].toInt()
+        val take = args[2].toInt()
+        log.info("chunk size: $chunkSize, drop: $drop, take: $take")
+        buildAndPersist(indexDir, knownWords, chunkSize, drop, take)
     }
 
-    fun buildAndPersist(indexDir: File, knownWords: List<String>, chunkSize: Int) {
+    fun buildAndPersist(indexDir: File, knownWords: List<String>, chunkSize: Int, drop: Int = 0, take: Int) {
         val nThreads = 4
         val tpContext = newFixedThreadPoolContext(nThreads, "tp")
 
-        log.info("Building indexes in chunks by $chunkSize words")
-        knownWords.asSequence().chunked(chunkSize).withIndex().chunked(nThreads).map { chunks ->
+        knownWords.asSequence().drop(drop).take(take).chunked(chunkSize).withIndex().chunked(nThreads).map { chunks ->
             val indexes = runBlocking {
                 chunks.map { (i, words) ->
                     log.info("chunk #$i start")
                     async(tpContext) { build(words).toList() }
-                }.flatMap { it.await() }
+                }.map { it.await() } // don't flatMap here, to save the memory
             }
-            indexes.forEach { (firstLast, index) ->
-                val indexFile = WordIndex.indexFile(indexDir, firstLast)
-                if (!indexFile.exists())
-                    indexFile.createNewFile()
+            indexes.forEach { indexes ->
+                indexes.forEach { (firstLast, index) ->
+                    val indexFile = WordIndex.indexFile(indexDir, firstLast)
+                    if (!indexFile.exists())
+                        indexFile.createNewFile()
 
-                val indexFromFile = WordIndex.read(indexDir, firstLast)
-                val combinedIndex = indexFromFile?.let { index.merge(it) } ?: index
-                combinedIndex.writeTo(indexDir, firstLast)
+                    val indexFromFile = WordIndex.read(indexDir, firstLast)
+                    val combinedIndex = indexFromFile?.let { index.merge(it) } ?: index
+                    combinedIndex.writeTo(indexDir, firstLast)
+                }
             }
         }.count() // drain the sequence
     }
 
     fun build(knownWords: List<String>): Map<FirstLastChar, WordIndex> {
-        tailrec fun combinations(word: String, firstLast: FirstLastChar, charIdx: Int, acc: List<List<Char>> = emptyList()): Set<Set<Char>> {
-            val char = word.firstOrNull()
-            return if (char == null) {
-                acc.asSequence().map { it.toSet() }.toSet()
-            } else {
-                val nextWord = word.drop(1)
-                if (nextWord.isEmpty() || charIdx == 0) {
-                    // skip first and last chars, we don't need them in the index, because we query index without last char
-                    combinations(nextWord, firstLast, charIdx + 1, acc)
-                } else {
-                    val nextAcc = acc.flatMap { list -> listOf(list, list + char) }.plusElement(listOf(firstLast.firstChar, char, firstLast.lastChar))
-                    combinations(nextWord, firstLast, charIdx + 1, nextAcc)
+        fun combinations(word: String, firstLast: FirstLastChar): Set<Set<Char>> {
+            var mutAcc = mutableListOf<List<Char>>()
+            val chars = word.toCharArray()
+            chars.withIndex().forEach { (charIdx, char) ->
+                // skip first and last chars, we don't need them alone in the index
+                if (charIdx > 0 && charIdx < chars.size) {
+                    val nextMutAcc = mutableListOf<List<Char>>()
+                    mutAcc.forEach { list ->
+                        nextMutAcc.add(list)
+                        nextMutAcc.add(list + char)
+                    }
+                    nextMutAcc.add(CharsCache.create(firstLast.firstChar, char, firstLast.lastChar))
+                    mutAcc = nextMutAcc
                 }
             }
+            return mutAcc.asSequence().map { it.toSet() }.toSet()
         }
-
-        fun combinations(word: String, firstLast: FirstLastChar) =
-                combinations(word, firstLast, 0, listOf(listOf(firstLast.firstChar, firstLast.lastChar)))
 
         val allIndexesMap = mutableMapOf<FirstLastChar, MutableMap<Set<Char>, List<String>>>()
         knownWords.asSequence().groupBy { FirstLastChar(it.first().toLowerCase(), it.last().toLowerCase()) }.map { (firstLast, words) ->
@@ -82,5 +90,92 @@ object IndexBuilder {
             allIndexesMap[firstLast] = indexMap
         }
         return allIndexesMap.mapValues { (_, value) -> WordIndex(value.toMap()) }
+    }
+}
+
+private object CharsCache {
+    private val singleLetterCache = SoftCache(PerpetualCache())
+
+    // don't use varargs, we don't wanna allocate redundant array here
+    fun create(c1: Char, c2: Char, c3: Char): List<Char> {
+        val key = Objects.hash(c1, c2, c3)
+        val existing = singleLetterCache.get(key)
+        return if (existing == null) {
+            val new = listOf(c1, c2, c3)
+            singleLetterCache[key] = new
+            new
+        } else {
+            existing as List<Char>
+        }
+    }
+}
+
+private interface Cache {
+    val size: Int
+
+    operator fun set(key: Any, value: Any)
+
+    operator fun get(key: Any): Any?
+
+    fun remove(key: Any): Any?
+
+    fun clear()
+}
+
+private class PerpetualCache : Cache {
+    private val cache = ConcurrentHashMap<Any, Any>()
+
+    override val size: Int
+        get() = cache.size
+
+    override fun set(key: Any, value: Any) {
+        this.cache[key] = value
+    }
+
+    override fun remove(key: Any) = this.cache.remove(key)
+
+    override fun get(key: Any) = this.cache[key]
+
+    override fun clear() = this.cache.clear()
+}
+
+private class SoftCache(private val delegate: Cache) : Cache {
+    private val referenceQueue = ReferenceQueue<Any>()
+
+    private class SoftEntry internal constructor(
+            internal val key: Any,
+            value: Any,
+            referenceQueue: ReferenceQueue<Any>) : SoftReference<Any>(value, referenceQueue)
+
+    override val size: Int
+        get() = delegate.size
+
+    override fun set(key: Any, value: Any) {
+        removeUnreachableItems()
+        val softEntry = SoftEntry(key, value, referenceQueue)
+        delegate[key] = softEntry
+    }
+
+    override fun remove(key: Any) {
+        delegate.remove(key)
+        removeUnreachableItems()
+    }
+
+    override fun get(key: Any): Any? {
+        val softEntry = delegate[key] as SoftEntry?
+        softEntry?.get()?.let { return it }
+        delegate.remove(key)
+        return null
+    }
+
+    override fun clear() = delegate.clear()
+
+    private fun removeUnreachableItems() {
+        var softEntry = referenceQueue.poll() as SoftEntry?
+        while (softEntry != null) {
+            val key = softEntry.key
+            delegate.remove(key)
+            softEntry = referenceQueue.poll() as SoftEntry?
+        }
     }
 }
